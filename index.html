@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Quiz Bébé — 30 ans de Chloé 🎂</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{margin:0;font-family:'Georgia','Times New Roman',serif;background:#FDF0F3}
+input::placeholder,textarea::placeholder{color:#9B6B7A}
+select option{background:white;color:#3A2030}
+button:hover:not(:disabled){filter:brightness(1.06);transform:translateY(-1px)}
+button:active:not(:disabled){transform:translateY(0)}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+
+const ADMIN_PWD  = "chloe30ans";
+const LOCAL_KEY  = "chloe_locked_player";
+const IMGBB_KEY  = "998ae051600461d4fa8db6519cb34a21";
+const API_URL    = "/.netlify/functions/api";
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+async function dbGet(key) {
+  const r = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "get", key }),
+  });
+  const j = await r.json();
+  return j.value ?? null;
+}
+
+async function dbSet(key, value) {
+  await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "set", key, value }),
+  });
+}
+
+async function dbGetAll() {
+  const r = await fetch(API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "get_all" }),
+  });
+  const j = await r.json();
+  return j.data ?? {};
+}
+
+// ── Image upload ImgBB ────────────────────────────────────────────────────────
+async function uploadPhoto(file) {
+  const compressed = await new Promise((res, rej) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const SIZE = 300;
+      const canvas = document.createElement("canvas");
+      canvas.width = SIZE; canvas.height = SIZE;
+      const ctx = canvas.getContext("2d");
+      const ratio = Math.max(SIZE / img.width, SIZE / img.height);
+      const w = img.width * ratio, h = img.height * ratio;
+      ctx.drawImage(img, (SIZE - w) / 2, (SIZE - h) / 2, w, h);
+      res(canvas.toDataURL("image/jpeg", 0.65));
+    };
+    img.onerror = rej;
+    img.src = url;
+  });
+  const fd = new FormData();
+  fd.append("image", compressed.split(",")[1]);
+  const r = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_KEY}`, { method: "POST", body: fd });
+  if (!r.ok) throw new Error("ImgBB " + r.status);
+  const j = await r.json();
+  if (!j.success) throw new Error("ImgBB error");
+  return j.data.url;
+}
+
+// ── Score ─────────────────────────────────────────────────────────────────────
+function calcScore(answers, photos) {
+  let pts = 0, maxPts = 0, correct = 0;
+  for (const ph of photos) {
+    const w = ph.bonus ? 3 : 1;
+    maxPts += w;
+    if (answers[ph.id] === ph.correctName) { pts += w; correct++; }
+  }
+  return { pts, maxPts, correct, total: photos.length, pct: maxPts ? Math.round(pts / maxPts * 100) : 0 };
+}
+
+function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
+
+// ── Design ────────────────────────────────────────────────────────────────────
+const C = {
+  bg:"#FDF0F3", card:"#FFFFFF",
+  pink1:"#FF4D82", pink2:"#FF8FAB", pink3:"#FFD6E0", pink4:"#FFF0F4",
+  gold:"#F5A623", goldLight:"#FFF8E6", goldBorder:"#F5C842",
+  text:"#3A2030", sub:"#9B6B7A", border:"#FFBDD0",
+};
+const sans = "'Helvetica Neue',Arial,sans-serif";
+const { useState, useEffect, useRef, useMemo } = React;
+
+// ── UI primitives ─────────────────────────────────────────────────────────────
+function Stars() {
+  const pts = [{x:8,y:6,s:14,op:.5},{x:80,y:14,s:10,op:.38},{x:60,y:2,s:8,op:.32},{x:20,y:80,s:11,op:.42},{x:88,y:70,s:9,op:.35},{x:48,y:92,s:12,op:.48}];
+  return React.createElement('div',{style:{position:"absolute",inset:0,pointerEvents:"none",overflow:"hidden"}},
+    pts.map((s,i)=>React.createElement('svg',{key:i,width:s.s,height:s.s,viewBox:"0 0 24 24",style:{position:"absolute",left:`${s.x}%`,top:`${s.y}%`,opacity:s.op,fill:C.pink1}},
+      React.createElement('polygon',{points:"12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"})
+    ))
+  );
+}
+
+function Btn({children,onClick,disabled,outline,small,gold,style={}}) {
+  return React.createElement('button',{onClick,disabled,style:{
+    padding:small?"8px 18px":"13px 28px",borderRadius:"50px",
+    border:outline?`2px solid ${gold?C.gold:C.pink1}`:"none",
+    background:disabled?"#EDD5DC":outline?"white":gold?`linear-gradient(135deg,${C.gold},#FFB347)`:`linear-gradient(135deg,${C.pink1},${C.pink2})`,
+    color:disabled?"#BFA0AA":outline?(gold?C.gold:C.pink1):"white",
+    fontSize:small?"0.82rem":"1rem",fontFamily:sans,fontWeight:700,
+    cursor:disabled?"not-allowed":"pointer",
+    boxShadow:disabled||outline?"none":gold?"0 6px 20px rgba(245,166,35,.35)":"0 6px 20px rgba(255,77,130,.35)",
+    transition:"all 0.18s",...style,
+  }},children);
+}
+
+function Card({children,style={},maxWidth="460px"}) {
+  return React.createElement('div',{style:{background:C.card,borderRadius:"24px",padding:"32px 28px",maxWidth,width:"100%",border:`1.5px solid ${C.border}`,boxShadow:"0 12px 48px rgba(255,77,130,.12)",position:"relative",overflow:"hidden",animation:"fadeIn 0.3s ease",...style}},children);
+}
+
+function Banner({children,style={}}) {
+  return React.createElement('div',{style:{background:C.pink1,color:"white",fontFamily:sans,fontWeight:800,fontSize:"0.82rem",letterSpacing:"2px",textTransform:"uppercase",padding:"7px 22px",textAlign:"center",display:"inline-block",clipPath:"polygon(12px 0%,calc(100% - 12px) 0%,100% 50%,calc(100% - 12px) 100%,12px 100%,0% 50%)",...style}},children);
+}
+
+function Script({children,size="2.6rem",color=C.pink1,style={}}) {
+  return React.createElement('div',{style:{fontFamily:"'Georgia',serif",fontSize:size,color,fontStyle:"italic",fontWeight:400,lineHeight:1.1,...style}},children);
+}
+
+function Center({children}) {
+  return React.createElement('div',{style:{minHeight:"100vh",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"24px",position:"relative",zIndex:1}},children);
+}
+
+function Spinner({text="Chargement…"}) {
+  return React.createElement(Center,null,
+    React.createElement('div',{style:{textAlign:"center"}},
+      React.createElement('div',{style:{width:"44px",height:"44px",border:`4px solid ${C.pink3}`,borderTop:`4px solid ${C.pink1}`,borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto 14px"}}),
+      React.createElement(Script,{size:"1.4rem"},text)
+    )
+  );
+}
+
+function PinkSelect({value,onChange,children}) {
+  return React.createElement('div',{style:{position:"relative"}},
+    React.createElement('select',{value,onChange,style:{width:"100%",padding:"12px 40px 12px 14px",borderRadius:"12px",border:`2px solid ${C.border}`,background:C.pink4,color:value?C.text:C.sub,fontSize:"0.95rem",fontFamily:sans,outline:"none",appearance:"none",WebkitAppearance:"none",cursor:"pointer",boxSizing:"border-box"}},children),
+    React.createElement('div',{style:{position:"absolute",right:"12px",top:"50%",transform:"translateY(-50%)",color:C.pink1,pointerEvents:"none"}},"▾")
+  );
+}
+
+function Modal({children}) {
+  return React.createElement('div',{style:{position:"fixed",inset:0,background:"rgba(58,32,48,.5)",backdropFilter:"blur(4px)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300,padding:"20px"}},
+    React.createElement(Card,{maxWidth:"380px",style:{textAlign:"center"}},
+      React.createElement(Stars),children
+    )
+  );
+}
+
+function Confetti({active}) {
+  const ref=useRef(null);
+  useEffect(()=>{
+    if(!active)return;
+    const canvas=ref.current;if(!canvas)return;
+    const ctx=canvas.getContext("2d");
+    const resize=()=>{canvas.width=window.innerWidth;canvas.height=window.innerHeight;};
+    resize();window.addEventListener("resize",resize);
+    const cols=["#FF8FAB","#FFB3C6","#FF4D6D","#FFCCD5","#FF006E","#FFC8DD"];
+    const parts=Array.from({length:160},()=>({x:Math.random()*window.innerWidth,y:Math.random()*-window.innerHeight,w:Math.random()*12+5,h:Math.random()*7+3,color:cols[Math.floor(Math.random()*cols.length)],rot:Math.random()*360,rotS:(Math.random()-.5)*7,vy:Math.random()*3+1.5,vx:(Math.random()-.5)*2}));
+    let frame;
+    const draw=()=>{ctx.clearRect(0,0,canvas.width,canvas.height);parts.forEach(p=>{ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.rot*Math.PI/180);ctx.fillStyle=p.color;ctx.fillRect(-p.w/2,-p.h/2,p.w,p.h);ctx.restore();p.y+=p.vy;p.x+=p.vx;p.rot+=p.rotS;if(p.y>window.innerHeight){p.y=-20;p.x=Math.random()*window.innerWidth;}});frame=requestAnimationFrame(draw);};
+    draw();
+    return()=>{cancelAnimationFrame(frame);window.removeEventListener("resize",resize);};
+  },[active]);
+  if(!active)return null;
+  return React.createElement('canvas',{ref,style:{position:"fixed",top:0,left:0,pointerEvents:"none",zIndex:9999}});
+}
+
+// ── Welcome ───────────────────────────────────────────────────────────────────
+function Welcome({photos,locked,onPlay,onAdmin}) {
+  const names=useMemo(()=>photos.filter(p=>!p.excluded).map(p=>p.correctName).sort(),[photos]);
+  const [sel,setSel]=useState("");
+  const [confirm,setConfirm]=useState(false);
+  const [err,setErr]=useState("");
+  useEffect(()=>{if(locked)setSel(locked);},[locked]);
+
+  return React.createElement(Center,null,
+    React.createElement(Card,{maxWidth:"480px"},
+      React.createElement(Stars),
+      React.createElement('div',{style:{textAlign:"center",marginBottom:"20px"}},
+        React.createElement('div',{style:{fontSize:"0.72rem",fontFamily:sans,fontWeight:800,letterSpacing:"3px",color:C.sub,textTransform:"uppercase",marginBottom:"12px"}},"30 MAI 2026 · DORDOGNE"),
+        React.createElement(Banner,null,"Tu es invité·e !"),
+        React.createElement('div',{style:{marginTop:"14px",fontFamily:sans,fontWeight:700,fontSize:"0.9rem",color:C.text,letterSpacing:"1px"}},"AU QUIZ BÉBÉ DES"),
+        React.createElement(Script,{size:"3rem",style:{margin:"2px 0 4px"}},"30 ans de Chloé"),
+        React.createElement('div',{style:{color:C.sub,fontSize:"0.82rem",fontFamily:sans}},"Sauras-tu reconnaître qui est qui ? 🍼")
+      ),
+      React.createElement('div',{style:{height:"1px",background:C.pink3,margin:"18px 0"}}),
+      locked
+        ? React.createElement('div',{style:{textAlign:"center"}},
+            React.createElement('div',{style:{fontFamily:sans,fontWeight:700,fontSize:"0.76rem",color:C.sub,textTransform:"uppercase",letterSpacing:"1px",marginBottom:"6px"}},"Connexion enregistrée"),
+            React.createElement('div',{style:{fontSize:"1.1rem",fontWeight:700,color:C.text,fontFamily:sans}},"Bienvenue, ",React.createElement('span',{style:{color:C.pink1}},locked)," !"),
+            React.createElement(Btn,{onClick:()=>onPlay(locked),style:{width:"100%",marginTop:"14px"}},"Continuer le quiz 🎉")
+          )
+        : names.length===0
+          ? React.createElement('div',{style:{textAlign:"center",color:C.sub,fontFamily:sans,fontStyle:"italic"}},"Le quiz n'est pas encore configuré. Reviens bientôt ! 🌸")
+          : React.createElement('div',null,
+              React.createElement('div',{style:{fontFamily:sans,fontWeight:700,fontSize:"0.76rem",color:C.sub,textTransform:"uppercase",letterSpacing:"1px",marginBottom:"7px"}},"Qui es-tu ?"),
+              React.createElement(PinkSelect,{value:sel,onChange:e=>{setSel(e.target.value);setErr("");}},
+                React.createElement('option',{value:""},"— Sélectionne ton prénom —"),
+                names.map(n=>React.createElement('option',{key:n,value:n},n))
+              ),
+              err&&React.createElement('div',{style:{color:C.pink1,fontSize:"0.8rem",marginTop:"6px",fontFamily:sans,fontWeight:700}},err),
+              React.createElement(Btn,{onClick:()=>{if(!sel){setErr("Choisis ton prénom !");return;}setConfirm(true);},style:{width:"100%",marginTop:"14px"}},"Jouer maintenant 🎉")
+            ),
+      React.createElement('div',{style:{textAlign:"center",marginTop:"18px"}},
+        React.createElement('button',{onClick:onAdmin,style:{background:"none",border:"none",color:C.sub,fontSize:"0.75rem",fontFamily:sans,cursor:"pointer"}},"🔐 Admin")
+      )
+    ),
+    confirm&&React.createElement(Modal,null,
+      React.createElement('div',{style:{fontSize:"2.5rem",marginBottom:"8px"}},"🌸"),
+      React.createElement('div',{style:{fontFamily:sans,fontWeight:800,fontSize:"0.72rem",letterSpacing:"2px",textTransform:"uppercase",color:C.sub,marginBottom:"10px"}},"Confirmation"),
+      React.createElement('div',{style:{fontFamily:sans,fontSize:"1.05rem",color:C.text,marginBottom:"6px"}},"Es-tu bien…"),
+      React.createElement(Script,{size:"2.4rem",style:{marginBottom:"12px"}},sel),
+      React.createElement('div',{style:{color:C.sub,fontFamily:sans,fontSize:"0.82rem",marginBottom:"18px",lineHeight:1.6}},
+        "⚠️ Une fois confirmé, ton prénom sera ",React.createElement('strong',null,"mémorisé sur cet appareil"),". Tu ne pourras pas jouer sous un autre nom."
+      ),
+      React.createElement(Btn,{onClick:()=>{setConfirm(false);onPlay(sel);},style:{width:"100%",marginBottom:"10px"}},"✅ Oui, c'est bien moi !"),
+      React.createElement(Btn,{outline:true,onClick:()=>setConfirm(false),style:{width:"100%"}},"← Non, changer")
+    )
+  );
+}
+
+// ── Admin Login ───────────────────────────────────────────────────────────────
+function AdminLogin({onOk,onBack}) {
+  const [pwd,setPwd]=useState("");const [err,setErr]=useState("");
+  return React.createElement(Center,null,
+    React.createElement(Card,{maxWidth:"400px",style:{textAlign:"center"}},
+      React.createElement(Stars),
+      React.createElement(Script,{size:"2rem",style:{marginBottom:"6px"}},"Admin"),
+      React.createElement('div',{style:{color:C.sub,fontFamily:sans,fontSize:"0.84rem",marginBottom:"18px"}},"Accès réservé à Chloé 🌸"),
+      React.createElement('input',{type:"password",placeholder:"Mot de passe...",value:pwd,onChange:e=>{setPwd(e.target.value);setErr("");},onKeyDown:e=>e.key==="Enter"&&(pwd===ADMIN_PWD?onOk():setErr("Mot de passe incorrect !")),style:{width:"100%",padding:"12px 16px",borderRadius:"12px",border:`2px solid ${C.border}`,background:C.pink4,color:C.text,fontSize:"1rem",fontFamily:sans,outline:"none",boxSizing:"border-box"}}),
+      err&&React.createElement('div',{style:{color:C.pink1,fontSize:"0.8rem",marginTop:"6px",fontFamily:sans,fontWeight:700}},err),
+      React.createElement(Btn,{onClick:()=>pwd===ADMIN_PWD?onOk():setErr("Mot de passe incorrect !"),style:{width:"100%",marginTop:"14px"}},"Entrer"),
+      React.createElement('div',{style:{marginTop:"12px"}},React.createElement(Btn,{outline:true,small:true,onClick:onBack},"← Retour"))
+    )
+  );
+}
+
+// ── Admin Panel ───────────────────────────────────────────────────────────────
+function AdminPanel({photos,results,winner,revealed,onSave,onSetWinner,onReveal,onBack}) {
+  const [tab,setTab]=useState("photos");
+  const [lp,setLp]=useState(photos);
+  const [busy,setBusy]=useState(false);
+  const [progress,setProgress]=useState("");
+  const [saving,setSaving]=useState(false);
+  const [saved,setSaved]=useState(false);
+  const [confirmRev,setConfirmRev]=useState(false);
+  const fRef=useRef(null);
+
+  async function addPhotos(e){
+    setBusy(true);
+    const files=Array.from(e.target.files);
+    for(let i=0;i<files.length;i++){
+      const f=files[i];
+      setProgress(`Upload ${i+1}/${files.length} — ${f.name.slice(0,25)}…`);
+      try{
+        const url=await uploadPhoto(f);
+        const cn=f.name.replace(/\.[^.]+$/,"").replace(/[_-]/g," ");
+        setLp(p=>[...p,{id:Date.now()+Math.random(),src:url,correctName:cn,bonus:false,excluded:false}]);
+      }catch(err){
+        setProgress(`❌ Erreur ${f.name.slice(0,20)} — on continue…`);
+        await new Promise(r=>setTimeout(r,1500));
+      }
+    }
+    setProgress("");setBusy(false);
+  }
+
+  async function save(){
+    setSaving(true);
+    await onSave(lp);
+    setSaving(false);setSaved(true);setTimeout(()=>setSaved(false),2500);
+  }
+
+  const submitted=results.filter(r=>r.submitted);
+  const inProgress=results.filter(r=>!r.submitted);
+
+  const stats=useMemo(()=>{
+    if(!submitted.length||!photos.length)return null;
+    return photos.map(ph=>{
+      const correct=submitted.filter(r=>(r.answers||{})[ph.id]===ph.correctName).length;
+      const attempted=submitted.filter(r=>(r.answers||{})[ph.id]!==undefined).length;
+      return{...ph,correct,attempted,pct:attempted?Math.round(correct/attempted*100):0};
+    }).sort((a,b)=>b.pct-a.pct);
+  },[submitted,photos]);
+
+  const tabS=(t)=>({flex:1,padding:"10px 5px",border:"none",borderRadius:"10px",cursor:"pointer",fontFamily:sans,fontWeight:700,fontSize:"0.78rem",background:tab===t?C.pink1:"transparent",color:tab===t?"white":C.sub,transition:"all 0.2s"});
+
+  return React.createElement('div',{style:{minHeight:"100vh",background:C.bg,padding:"16px"}},
+    React.createElement('div',{style:{maxWidth:"1000px",margin:"0 auto"}},
+      React.createElement(Card,{maxWidth:"1000px",style:{padding:"20px"}},
+        React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px"}},
+          React.createElement(Script,{size:"1.7rem"},"Admin — Quiz Chloé"),
+          React.createElement(Btn,{outline:true,small:true,onClick:onBack},"← Quitter")
+        ),
+        React.createElement('div',{style:{display:"flex",gap:"4px",background:C.pink4,borderRadius:"12px",padding:"4px",marginBottom:"18px"}},
+          React.createElement('button',{style:tabS("photos"),onClick:()=>setTab("photos")},"📸 Photos"),
+          React.createElement('button',{style:tabS("results"),onClick:()=>setTab("results")},`🏆 Résultats (${submitted.length})`),
+          React.createElement('button',{style:tabS("stats"),onClick:()=>setTab("stats")},"📊 Stats")
+        ),
+
+        // ── PHOTOS
+        tab==="photos"&&React.createElement('div',null,
+          React.createElement('div',{style:{marginBottom:"12px",fontFamily:sans,fontSize:"0.76rem",color:C.sub}},
+            "⭐ Bonus = 3 pts (invisible joueurs) · 🚫 Exclu = pas de connexion mais dans le jeu"
+          ),
+          React.createElement('input',{ref:fRef,type:"file",multiple:true,accept:"image/*",style:{display:"none"},onChange:addPhotos}),
+          React.createElement(Btn,{small:true,onClick:()=>fRef.current.click(),disabled:busy},busy?"⏳ Upload en cours...":"📁 Ajouter des photos"),
+          busy&&progress&&React.createElement('div',{style:{fontFamily:sans,fontSize:"0.8rem",color:C.gold,marginTop:"6px",fontWeight:700}},progress),
+          React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(148px,1fr))",gap:"10px",marginTop:"14px"}},
+            lp.map(ph=>React.createElement('div',{key:ph.id,style:{background:ph.bonus?C.goldLight:C.pink4,borderRadius:"14px",padding:"8px",position:"relative",border:`2px solid ${ph.bonus?C.goldBorder:ph.excluded?"#ccc":C.border}`}},
+              React.createElement('div',{style:{position:"absolute",top:"6px",right:"28px",zIndex:2,display:"flex",gap:"3px"}},
+                ph.bonus&&React.createElement('div',{style:{background:`linear-gradient(135deg,${C.gold},#FFB347)`,color:"white",fontSize:"0.52rem",fontFamily:sans,fontWeight:900,padding:"2px 6px",borderRadius:"6px"}},"⭐×3"),
+                ph.excluded&&React.createElement('div',{style:{background:"#888",color:"white",fontSize:"0.52rem",fontFamily:sans,fontWeight:800,padding:"2px 6px",borderRadius:"6px"}},"🚫")
+              ),
+              React.createElement('button',{onClick:()=>setLp(p=>p.filter(x=>x.id!==ph.id)),style:{position:"absolute",top:"6px",right:"6px",background:C.pink1,color:"white",border:"none",borderRadius:"50%",width:"20px",height:"20px",cursor:"pointer",fontSize:"0.68rem",lineHeight:"20px",padding:0,zIndex:2}},"✕"),
+              React.createElement('div',{style:{background:"white",padding:"5px 5px 20px",borderRadius:"4px",marginTop:"4px",opacity:ph.excluded?.75:1}},
+                React.createElement('img',{src:ph.src,alt:"",style:{width:"100%",aspectRatio:"1",objectFit:"cover",borderRadius:"2px",display:"block"}})
+              ),
+              React.createElement('input',{value:ph.correctName,onChange:e=>setLp(p=>p.map(x=>x.id===ph.id?{...x,correctName:e.target.value}:x)),style:{width:"100%",marginTop:"5px",padding:"4px 7px",borderRadius:"7px",border:`1px solid ${C.border}`,background:"white",fontSize:"0.7rem",fontFamily:sans,color:C.text,outline:"none",boxSizing:"border-box"}}),
+              React.createElement('div',{style:{display:"flex",gap:"4px",marginTop:"5px"}},
+                React.createElement('button',{onClick:()=>setLp(p=>p.map(x=>x.id===ph.id?{...x,bonus:!x.bonus}:x)),style:{flex:1,padding:"4px 3px",borderRadius:"7px",cursor:"pointer",fontSize:"0.63rem",fontFamily:sans,fontWeight:700,background:ph.bonus?`linear-gradient(135deg,${C.gold},#FFB347)`:"white",color:ph.bonus?"white":C.gold,border:`1.5px solid ${C.goldBorder}`}},"⭐ Bonus"),
+                React.createElement('button',{onClick:()=>setLp(p=>p.map(x=>x.id===ph.id?{...x,excluded:!x.excluded}:x)),style:{flex:1,padding:"4px 3px",borderRadius:"7px",cursor:"pointer",fontSize:"0.63rem",fontFamily:sans,fontWeight:700,background:ph.excluded?"#888":"white",color:ph.excluded?"white":"#888",border:"1.5px solid #ccc"}},"🚫 Exclu")
+              )
+            ))
+          ),
+          React.createElement('div',{style:{marginTop:"16px",display:"flex",gap:"12px",alignItems:"center",flexWrap:"wrap"}},
+            React.createElement(Btn,{onClick:save,disabled:saving},saving?"⏳ Sauvegarde…":saved?"✅ Sauvegardé !":"💾 Sauvegarder"),
+            React.createElement('div',{style:{fontFamily:sans,fontSize:"0.8rem",color:C.sub}},`${lp.length} photos · ${lp.filter(p=>p.bonus).length} bonus · ${lp.filter(p=>p.excluded).length} sans joueur`)
+          )
+        ),
+
+        // ── RESULTS
+        tab==="results"&&React.createElement('div',null,
+          React.createElement('div',{style:{background:revealed?"#E8F8EF":C.pink4,border:`1.5px solid ${revealed?"#6BCB77":C.border}`,borderRadius:"16px",padding:"16px 18px",marginBottom:"16px"}},
+            revealed
+              ?React.createElement('div',{style:{display:"flex",alignItems:"center",gap:"12px"}},
+                  React.createElement('div',{style:{fontSize:"1.8rem"}},"✅"),
+                  React.createElement('div',{style:{fontFamily:sans}},
+                    React.createElement('div',{style:{fontWeight:800,color:"#27AE60"}},"Résultats révélés !"),
+                    React.createElement('div',{style:{color:C.sub,fontSize:"0.82rem"}},"Les invités voient maintenant qui est qui.")
+                  )
+                )
+              :React.createElement('div',null,
+                  React.createElement('div',{style:{fontWeight:800,fontFamily:sans,color:C.pink1,marginBottom:"5px"}},"🔒 Résultats masqués"),
+                  React.createElement('div',{style:{color:C.sub,fontFamily:sans,fontSize:"0.82rem",marginBottom:"10px"}},"Clique quand tu veux révéler les vraies réponses !"),
+                  React.createElement(Btn,{small:true,onClick:()=>setConfirmRev(true)},"🎉 Révéler les résultats à tous")
+                )
+          ),
+          inProgress.length>0&&React.createElement('div',{style:{marginBottom:"14px"}},
+            React.createElement('div',{style:{fontFamily:sans,fontWeight:700,fontSize:"0.76rem",color:C.sub,textTransform:"uppercase",letterSpacing:"1px",marginBottom:"7px"}},`En cours (${inProgress.length})`),
+            inProgress.map(r=>React.createElement('div',{key:r.playerName,style:{background:C.pink4,border:`1px solid ${C.border}`,borderRadius:"12px",padding:"10px 14px",marginBottom:"5px",display:"flex",alignItems:"center",gap:"12px"}},
+              React.createElement('div',{style:{fontSize:"1.2rem"}},"⏳"),
+              React.createElement('div',{style:{flex:1,fontFamily:sans}},
+                React.createElement('div',{style:{fontWeight:700,color:C.text}},r.playerName),
+                React.createElement('div',{style:{fontSize:"0.76rem",color:C.sub}},`${Object.keys(r.answers||{}).length}/${photos.length} réponses`)
+              )
+            ))
+          ),
+          React.createElement('div',{style:{fontFamily:sans,fontWeight:700,fontSize:"0.76rem",color:C.sub,textTransform:"uppercase",letterSpacing:"1px",marginBottom:"7px"}},`Soumis (${submitted.length})`),
+          submitted.length===0&&React.createElement('div',{style:{color:C.sub,fontFamily:sans,fontStyle:"italic"}},"Aucune soumission pour l'instant."),
+          [...submitted].sort((a,b)=>calcScore(b.answers||{},photos).pts-calcScore(a.answers||{},photos).pts).map((r,i)=>{
+            const sc=calcScore(r.answers||{},photos);const isW=winner===r.playerName;
+            return React.createElement('div',{key:r.playerName,style:{background:isW?"#FFF9E6":"white",border:`1.5px solid ${isW?C.goldBorder:C.border}`,borderRadius:"14px",padding:"12px 14px",marginBottom:"7px",display:"flex",alignItems:"center",gap:"12px"}},
+              React.createElement('div',{style:{fontSize:"1.3rem",minWidth:"26px",textAlign:"center"}},isW?"🏆":i===0?"🥇":i===1?"🥈":i===2?"🥉":`${i+1}.`),
+              React.createElement('div',{style:{flex:1,fontFamily:sans}},
+                React.createElement('div',{style:{fontWeight:800,color:C.text}},r.playerName),
+                React.createElement('div',{style:{fontSize:"0.76rem",color:C.sub}},r.date)
+              ),
+              React.createElement('div',{style:{textAlign:"right",marginRight:"8px"}},
+                React.createElement('div',{style:{fontSize:"1.4rem",fontWeight:900,color:sc.pct>=70?"#27AE60":sc.pct>=40?"#E67E22":C.pink1}},`${sc.pts} pts`),
+                React.createElement('div',{style:{fontSize:"0.7rem",color:C.sub,fontFamily:sans}},`${sc.pct}% · ${sc.correct}/${sc.total}`)
+              ),
+              !isW&&React.createElement(Btn,{gold:true,small:true,onClick:()=>onSetWinner(r.playerName)},"🏆 Élire")
+            );
+          }),
+          confirmRev&&React.createElement(Modal,null,
+            React.createElement('div',{style:{fontSize:"3rem",marginBottom:"8px"}},"🎉"),
+            React.createElement(Script,{size:"1.8rem",style:{marginBottom:"10px"}},"Révéler ?"),
+            React.createElement('p',{style:{color:C.sub,fontFamily:sans,fontSize:"0.85rem",marginBottom:"18px",lineHeight:1.6}},"Tous les invités découvriront les vraies identités. ",React.createElement('strong',null,"Irréversible.")),
+            React.createElement(Btn,{onClick:()=>{onReveal();setConfirmRev(false);},style:{width:"100%",marginBottom:"10px"}},"✅ Confirmer"),
+            React.createElement(Btn,{outline:true,onClick:()=>setConfirmRev(false),style:{width:"100%"}},"Annuler")
+          )
+        ),
+
+        // ── STATS
+        tab==="stats"&&React.createElement('div',null,
+          !stats||submitted.length===0
+            ?React.createElement('div',{style:{textAlign:"center",color:C.sub,fontFamily:sans,fontStyle:"italic",padding:"40px 0"}},"Les stats apparaîtront après les premières soumissions.")
+            :React.createElement('div',null,
+                React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(145px,1fr))",gap:"10px",marginBottom:"20px"}},
+                  [{icon:"👥",label:"Joueurs",val:submitted.length},{icon:"⭐",label:"Moy. pts",val:`${(submitted.reduce((s,r)=>s+calcScore(r.answers||{},photos).pts,0)/submitted.length).toFixed(1)} pts`},{icon:"📊",label:"Moy. score",val:`${Math.round(submitted.reduce((s,r)=>s+calcScore(r.answers||{},photos).pct,0)/submitted.length)}%`},{icon:"🏆",label:"Meilleur",val:`${Math.max(...submitted.map(r=>calcScore(r.answers||{},photos).pts))} pts`}]
+                  .map((k,i)=>React.createElement('div',{key:i,style:{background:C.pink4,border:`1.5px solid ${C.border}`,borderRadius:"14px",padding:"14px 12px",textAlign:"center"}},
+                    React.createElement('div',{style:{fontSize:"1.5rem"}},k.icon),
+                    React.createElement('div',{style:{fontSize:"1.2rem",fontWeight:900,color:C.pink1,fontFamily:sans}},k.val),
+                    React.createElement('div',{style:{fontSize:"0.7rem",color:C.sub,fontFamily:sans,textTransform:"uppercase",letterSpacing:"1px"}},k.label)
+                  ))
+                ),
+                React.createElement('div',{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px",marginBottom:"16px"}},
+                  [{title:"✅ Les + reconnus",color:"#27AE60",bg:"#E8F8EF",border:"#6BCB77",bar:"#6BCB77",data:stats.slice(0,5)},
+                   {title:"❓ Les + mystérieux",color:C.pink1,bg:"#FFF0F0",border:C.pink2,bar:C.pink1,data:[...stats].reverse().slice(0,5)}]
+                  .map((sec,si)=>React.createElement('div',{key:si,style:{background:sec.bg,border:`1.5px solid ${sec.border}`,borderRadius:"16px",padding:"14px"}},
+                    React.createElement('div',{style:{fontFamily:sans,fontWeight:800,fontSize:"0.8rem",color:sec.color,textTransform:"uppercase",letterSpacing:"1px",marginBottom:"10px"}},sec.title),
+                    sec.data.map(ph=>React.createElement('div',{key:ph.id,style:{display:"flex",alignItems:"center",gap:"7px",marginBottom:"7px"}},
+                      React.createElement('div',{style:{background:"white",padding:"2px 2px 8px",borderRadius:"2px",flexShrink:0}},React.createElement('img',{src:ph.src,alt:"",style:{width:"34px",height:"34px",objectFit:"cover",display:"block"}})),
+                      React.createElement('div',{style:{flex:1}},
+                        React.createElement('div',{style:{fontFamily:sans,fontWeight:700,fontSize:"0.76rem",color:C.text}},ph.correctName,ph.bonus&&" ⭐"),
+                        React.createElement('div',{style:{display:"flex",alignItems:"center",gap:"5px",marginTop:"2px"}},
+                          React.createElement('div',{style:{height:"5px",flex:1,background:"#ddd",borderRadius:"3px",overflow:"hidden"}},React.createElement('div',{style:{width:`${ph.pct}%`,height:"100%",background:sec.bar,borderRadius:"3px"}})),
+                          React.createElement('span',{style:{fontSize:"0.68rem",fontFamily:sans,color:sec.color,fontWeight:700,minWidth:"28px"}},`${ph.pct}%`)
+                        ),
+                        React.createElement('div',{style:{fontSize:"0.62rem",color:C.sub,fontFamily:sans}},`${ph.correct}/${ph.attempted}`)
+                      )
+                    ))
+                  ))
+                ),
+                React.createElement('div',{style:{background:C.pink4,border:`1.5px solid ${C.border}`,borderRadius:"16px",padding:"16px"}},
+                  React.createElement('div',{style:{fontFamily:sans,fontWeight:800,fontSize:"0.8rem",color:C.text,textTransform:"uppercase",letterSpacing:"1px",marginBottom:"12px"}},"📊 Toutes les photos"),
+                  React.createElement('div',{style:{display:"flex",flexDirection:"column",gap:"6px"}},
+                    stats.map(ph=>React.createElement('div',{key:ph.id,style:{display:"flex",alignItems:"center",gap:"8px"}},
+                      React.createElement('div',{style:{background:"white",padding:"2px 2px 8px",borderRadius:"2px",flexShrink:0}},React.createElement('img',{src:ph.src,alt:"",style:{width:"26px",height:"26px",objectFit:"cover"}})),
+                      React.createElement('div',{style:{width:"95px",flexShrink:0,fontFamily:sans,fontSize:"0.7rem",color:C.text,fontWeight:600}},ph.correctName,ph.bonus&&" ⭐"),
+                      React.createElement('div',{style:{flex:1,height:"9px",background:"#EDD5DC",borderRadius:"5px",overflow:"hidden"}},
+                        React.createElement('div',{style:{width:`${ph.pct}%`,height:"100%",borderRadius:"5px",background:ph.pct>=70?"linear-gradient(90deg,#6BCB77,#4CAF50)":ph.pct>=40?`linear-gradient(90deg,${C.gold},#FFB347)`:`linear-gradient(90deg,${C.pink2},${C.pink1})`}})
+                      ),
+                      React.createElement('div',{style:{width:"36px",flexShrink:0,textAlign:"right",fontFamily:sans,fontSize:"0.73rem",fontWeight:800,color:ph.pct>=70?"#27AE60":ph.pct>=40?C.gold:C.pink1}},`${ph.pct}%`)
+                    ))
+                  )
+                )
+              )
+        )
+      )
+    )
+  );
+}
+
+// ── Quiz ──────────────────────────────────────────────────────────────────────
+function Quiz({playerName,photos,savedAnswers,onSave,onSubmit}) {
+  const [answers,setAnswers]=useState(savedAnswers||{});
+  const [sel,setSel]=useState(null);
+  const [confirmSubmit,setConfirmSubmit]=useState(false);
+  const timer=useRef(null);
+  const done=Object.keys(answers).length;
+  const allDone=done===photos.length;
+  const usedNames=new Set(Object.values(answers));
+  const selPhoto=photos.find(p=>p.id===sel);
+  const allNames=photos.map(p=>p.correctName).sort();
+  const available=allNames.filter(n=>!usedNames.has(n)||(selPhoto&&answers[selPhoto.id]===n));
+
+  useEffect(()=>{
+    clearTimeout(timer.current);
+    timer.current=setTimeout(()=>onSave(answers),2000); // 2s debounce
+    return()=>clearTimeout(timer.current);
+  },[answers]);
+
+  function assignName(name){
+    if(!sel||!name)return;
+    setAnswers(a=>{const next={...a};for(const[pid,n]of Object.entries(next)){if(n===name&&String(pid)!==String(sel))delete next[pid];}next[sel]=name;return next;});
+    const idx=photos.findIndex(p=>p.id===sel);
+    const nxt=photos.slice(idx+1).find(p=>!answers[p.id]&&p.id!==sel)||photos.slice(0,idx).find(p=>!answers[p.id]&&p.id!==sel);
+    setSel(nxt?nxt.id:null);
+  }
+
+  return React.createElement('div',{style:{minHeight:"100vh",background:C.bg}},
+    React.createElement('div',{style:{position:"sticky",top:0,zIndex:50,background:"rgba(253,240,243,.96)",backdropFilter:"blur(12px)",borderBottom:`1.5px solid ${C.border}`,padding:"11px 18px",display:"flex",alignItems:"center",gap:"12px",flexWrap:"wrap"}},
+      React.createElement('div',{style:{flex:1}},
+        React.createElement(Script,{size:"1.2rem",style:{lineHeight:1.2}},`Quiz bébé · ${playerName}`),
+        React.createElement('div',{style:{fontFamily:sans,fontSize:"0.75rem",color:C.sub,marginTop:"1px"}},`${done}/${photos.length} identifiées ${allDone?"· ✅ Tout complété !":""}`)
+      ),
+      React.createElement('div',{style:{flex:"2 1 110px",height:"7px",background:C.pink3,borderRadius:"4px",overflow:"hidden"}},
+        React.createElement('div',{style:{width:`${(done/photos.length)*100}%`,height:"100%",background:`linear-gradient(90deg,${C.pink1},${C.pink2})`,borderRadius:"4px",transition:"width 0.3s"}})
+      ),
+      React.createElement(Btn,{small:true,disabled:!allDone,onClick:()=>setConfirmSubmit(true)},"🔒 Soumettre")
+    ),
+    React.createElement('div',{style:{textAlign:"center",padding:"10px 16px 4px",color:C.sub,fontFamily:sans,fontSize:"0.82rem",fontStyle:"italic"}},sel?"👇 Choisis un nom ci-dessous":"👆 Clique sur une photo pour lui attribuer un nom"),
+    React.createElement('div',{style:{padding:"6px 14px 160px",maxWidth:"1100px",margin:"0 auto"}},
+      React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:"11px"}},
+        photos.map(ph=>{
+          const isSel=sel===ph.id;const hasAns=!!answers[ph.id];
+          return React.createElement('div',{key:ph.id,onClick:()=>setSel(isSel?null:ph.id),style:{cursor:"pointer",transition:"all 0.2s",transform:isSel?"scale(1.05) translateY(-4px)":"scale(1)",position:"relative"}},
+            React.createElement('div',{style:{background:"white",padding:"6px 6px 30px",borderRadius:"3px",boxShadow:isSel?`0 0 0 3px ${C.pink1},0 12px 32px rgba(255,77,130,.3)`:hasAns?`0 0 0 2px ${C.pink2},0 5px 14px rgba(255,77,130,.12)`:"0 4px 14px rgba(58,32,48,.08)"}},
+              React.createElement('img',{src:ph.src,alt:"",style:{width:"100%",aspectRatio:"1",objectFit:"cover",display:"block"}}),
+              React.createElement('div',{style:{position:"absolute",bottom:"8px",left:0,right:0,textAlign:"center",padding:"0 5px"}},
+                hasAns
+                  ?React.createElement('div',{style:{display:"flex",alignItems:"center",justifyContent:"center",gap:"3px"}},
+                      React.createElement('span',{style:{fontSize:"0.63rem",fontFamily:sans,fontWeight:700,color:C.pink1,lineHeight:1.2}},answers[ph.id]),
+                      React.createElement('button',{onClick:e=>{e.stopPropagation();setAnswers(a=>{const n={...a};delete n[ph.id];return n;});},style:{background:"none",border:"none",color:C.pink1,cursor:"pointer",fontSize:"0.58rem",padding:0}},"✕")
+                    )
+                  :React.createElement('span',{style:{fontSize:"0.58rem",fontFamily:sans,color:"#bbb",fontStyle:"italic"}},isSel?"⬇ choisir":"?")
+              )
+            ),
+            isSel&&React.createElement('div',{style:{position:"absolute",bottom:"-10px",left:"50%",transform:"translateX(-50%)",background:C.pink1,color:"white",fontSize:"0.55rem",fontFamily:sans,fontWeight:800,letterSpacing:"1px",padding:"2px 9px",borderRadius:"8px",whiteSpace:"nowrap"}},"SÉLECTIONNÉE")
+          );
+        })
+      )
+    ),
+    sel&&React.createElement('div',{style:{position:"fixed",bottom:"14px",left:"50%",transform:"translateX(-50%)",background:"white",border:`2px solid ${C.pink1}`,borderRadius:"20px",padding:"14px 18px",zIndex:100,width:"min(500px,calc(100vw - 28px))",boxShadow:"0 8px 36px rgba(255,77,130,.2)"}},
+      React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"9px"}},
+        React.createElement('div',{style:{fontFamily:sans,fontWeight:800,fontSize:"0.8rem",color:C.pink1,textTransform:"uppercase",letterSpacing:"1px"}},"Qui est ce bébé ?"),
+        React.createElement('button',{onClick:()=>setSel(null),style:{background:"none",border:"none",color:C.sub,cursor:"pointer",fontSize:"1rem"}},"✕")
+      ),
+      React.createElement(PinkSelect,{value:selPhoto&&answers[selPhoto.id]?answers[selPhoto.id]:"",onChange:e=>{if(e.target.value)assignName(e.target.value);}},
+        React.createElement('option',{value:""},"— Choisir un nom —"),
+        selPhoto&&answers[selPhoto.id]&&React.createElement('option',{value:answers[selPhoto.id]},`✓ ${answers[selPhoto.id]} (actuel)`),
+        available.filter(n=>!(selPhoto&&answers[selPhoto.id]===n)).map(n=>React.createElement('option',{key:n,value:n},n))
+      ),
+      React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:"7px"}},
+        React.createElement('span',{style:{color:C.sub,fontFamily:sans,fontSize:"0.74rem"}},`${available.length} noms disponibles`),
+        selPhoto&&answers[selPhoto.id]&&React.createElement('button',{onClick:()=>{setAnswers(a=>{const n={...a};delete n[selPhoto.id];return n;});},style:{background:C.pink4,border:`1px solid ${C.border}`,color:C.pink1,padding:"4px 10px",borderRadius:"8px",cursor:"pointer",fontSize:"0.74rem",fontFamily:sans,fontWeight:700}},"🗑 Effacer")
+      )
+    ),
+    confirmSubmit&&React.createElement(Modal,null,
+      React.createElement('div',{style:{fontSize:"2.5rem",marginBottom:"8px"}},"🔒"),
+      React.createElement(Script,{size:"1.8rem",style:{marginBottom:"10px"}},"Soumettre ?"),
+      React.createElement('p',{style:{color:C.sub,fontFamily:sans,fontSize:"0.85rem",lineHeight:1.6,marginBottom:"18px"}},
+        "Tu as attribué un nom à chacune des ",React.createElement('strong',{style:{color:C.text}},`${photos.length} photos`),". ",React.createElement('span',{style:{color:C.pink1,fontWeight:700}},"Cette action est irréversible.")
+      ),
+      React.createElement(Btn,{onClick:()=>{setConfirmSubmit(false);onSubmit(answers);},style:{width:"100%",marginBottom:"10px"}},"✅ Oui, je soumets !"),
+      React.createElement(Btn,{outline:true,onClick:()=>setConfirmSubmit(false),style:{width:"100%"}},"← Continuer à modifier")
+    )
+  );
+}
+
+// ── Submitted ─────────────────────────────────────────────────────────────────
+function Submitted({playerName,photos,answers}) {
+  return React.createElement(Center,null,
+    React.createElement(Card,{maxWidth:"480px",style:{textAlign:"center"}},
+      React.createElement(Stars),
+      React.createElement('div',{style:{fontSize:"3.5rem",marginBottom:"8px"}},"🌸"),
+      React.createElement(Banner,{style:{marginBottom:"12px"}},"Réponses enregistrées !"),
+      React.createElement(Script,{size:"2rem",style:{margin:"12px 0 8px"}},playerName),
+      React.createElement('p',{style:{color:C.sub,fontFamily:sans,fontSize:"0.86rem",lineHeight:1.6,marginBottom:"18px"}},
+        "Merci ! Tes réponses sont bien enregistrées.",React.createElement('br'),
+        "Les résultats seront révélés par Chloé au moment choisi.",React.createElement('br'),
+        React.createElement('strong',null,"Reviens sur cette page pour les découvrir ! 🎉")
+      ),
+      React.createElement('div',{style:{background:C.pink4,borderRadius:"14px",padding:"12px",border:`1px solid ${C.border}`}},
+        React.createElement('div',{style:{fontFamily:sans,fontSize:"0.72rem",color:C.sub,marginBottom:"7px",fontWeight:700,letterSpacing:"1px",textTransform:"uppercase"}},`Tes ${photos.length} réponses`),
+        React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(68px,1fr))",gap:"5px"}},
+          photos.map(ph=>React.createElement('div',{key:ph.id,style:{textAlign:"center"}},
+            React.createElement('div',{style:{background:"white",padding:"2px 2px 12px",borderRadius:"3px"}},React.createElement('img',{src:ph.src,alt:"",style:{width:"100%",aspectRatio:"1",objectFit:"cover"}})),
+            React.createElement('div',{style:{fontSize:"0.56rem",color:C.sub,fontFamily:sans,marginTop:"2px",lineHeight:1.2}},answers[ph.id]||"—")
+          ))
+        )
+      )
+    )
+  );
+}
+
+// ── Results Revealed ──────────────────────────────────────────────────────────
+function ResultsRevealed({playerName,answers,photos,winner,allResults}) {
+  const sc=calcScore(answers,photos);
+  const isW=winner===playerName;
+  const sorted=[...allResults].filter(r=>r.submitted).sort((a,b)=>calcScore(b.answers||{},photos).pts-calcScore(a.answers||{},photos).pts);
+  return React.createElement('div',{style:{minHeight:"100vh",background:C.bg,padding:"22px 14px"}},
+    React.createElement(Confetti,{active:isW||sc.pct>=90}),
+    React.createElement('div',{style:{maxWidth:"700px",margin:"0 auto"}},
+      React.createElement(Card,{style:{textAlign:"center",marginBottom:"14px"}},
+        React.createElement(Stars),
+        React.createElement('div',{style:{fontSize:"3.5rem",lineHeight:1,marginBottom:"8px"}},isW?"🏆":sc.pct===100?"🌟":sc.pct>=80?"🔥":sc.pct>=60?"😄":"😅"),
+        isW&&React.createElement(Banner,{style:{marginBottom:"10px"}},"Grand Gagnant·e !"),
+        React.createElement(Script,{size:"2.4rem",style:{margin:"8px 0 4px"}},playerName),
+        React.createElement('div',{style:{fontSize:"3.2rem",fontWeight:900,color:C.pink1,lineHeight:1,margin:"10px 0"}},`${sc.pts} `,React.createElement('span',{style:{fontSize:"1.2rem",color:C.sub}},`/ ${sc.maxPts} pts`)),
+        React.createElement('div',{style:{color:C.sub,fontFamily:sans,fontSize:"0.86rem"}},`${sc.pct}% · ${sc.correct} bonne${sc.correct>1?"s":""} réponse${sc.correct>1?"s":""} sur ${sc.total}`),
+        React.createElement('div',{style:{color:C.pink1,fontFamily:sans,fontWeight:700,marginTop:"6px"}},sc.pct===100?"Parfait·e ! 🌟":sc.pct>=80?"Impressionnant·e ! 🔥":sc.pct>=60?"Bien joué·e ! 😄":sc.pct>=40?"Pas mal ! 😅":"Les bébés ont bien changé ! 😂")
+      ),
+      React.createElement(Card,{style:{marginBottom:"14px"}},
+        React.createElement('div',{style:{fontFamily:sans,fontWeight:800,fontSize:"0.86rem",color:C.text,marginBottom:"10px"}},"🏅 Classement"),
+        sorted.map((r,i)=>{const s=calcScore(r.answers||{},photos);const isMe=r.playerName===playerName;
+          return React.createElement('div',{key:r.playerName,style:{display:"flex",alignItems:"center",gap:"10px",padding:"9px 12px",borderRadius:"12px",marginBottom:"5px",background:isMe?C.pink4:"white",border:`1.5px solid ${isMe?C.pink1:C.border}`}},
+            React.createElement('div',{style:{fontSize:"1.2rem",minWidth:"24px",textAlign:"center"}},winner===r.playerName?"🏆":i===0?"🥇":i===1?"🥈":i===2?"🥉":`${i+1}.`),
+            React.createElement('div',{style:{flex:1,fontFamily:sans,fontWeight:isMe?800:600,color:C.text}},r.playerName,isMe?" (toi)":""),
+            React.createElement('div',{style:{fontFamily:sans}},
+              React.createElement('span',{style:{fontWeight:900,color:s.pct>=70?"#27AE60":s.pct>=40?"#E67E22":C.pink1}},`${s.pts} pts`),
+              React.createElement('span',{style:{color:C.sub,fontSize:"0.75rem",marginLeft:"6px"}},`${s.pct}%`)
+            )
+          );
+        })
+      ),
+      React.createElement(Card,null,
+        React.createElement('div',{style:{fontFamily:sans,fontWeight:800,fontSize:"0.86rem",color:C.text,marginBottom:"12px"}},"📸 Qui est qui ?"),
+        React.createElement('div',{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))",gap:"9px"}},
+          photos.map(ph=>{const given=answers[ph.id];const ok=given===ph.correctName;
+            return React.createElement('div',{key:ph.id,style:{background:ok?"#E8F8EF":"#FFF0F0",border:`2px solid ${ok?"#6BCB77":C.pink1}`,borderRadius:"12px",padding:"7px",textAlign:"center"}},
+              React.createElement('div',{style:{background:"white",padding:"4px 4px 18px",borderRadius:"3px"}},React.createElement('img',{src:ph.src,alt:"",style:{width:"100%",aspectRatio:"1",objectFit:"cover",borderRadius:"2px"}})),
+              React.createElement('div',{style:{fontSize:"0.68rem",fontFamily:sans,fontWeight:800,color:ok?"#27AE60":C.pink1,marginTop:"5px",lineHeight:1.3}},ok?"✓":"✗"," ",ph.correctName),
+              ph.bonus&&ok&&React.createElement('div',{style:{fontSize:"0.58rem",color:C.gold,fontFamily:sans,fontWeight:800,marginTop:"2px"}},"+3 pts ⭐"),
+              ph.bonus&&!ok&&React.createElement('div',{style:{fontSize:"0.58rem",color:C.gold,fontFamily:sans,marginTop:"2px",opacity:.7}},"valait ⭐ 3 pts"),
+              ph.excluded&&React.createElement('div',{style:{fontSize:"0.58rem",color:"#888",fontFamily:sans,marginTop:"2px"}},"🚫 sans joueur"),
+              !ok&&given&&React.createElement('div',{style:{fontSize:"0.6rem",color:C.sub,fontFamily:sans,marginTop:"1px"}},`Ta réponse : ${given}`)
+            );
+          })
+        )
+      )
+    )
+  );
+}
+
+// ── Root App ──────────────────────────────────────────────────────────────────
+function App() {
+  const [screen,setScreen]=useState("welcome");
+  const [playerName,setPN]=useState("");
+  const [photos,setPhotos]=useState([]);
+  const [results,setResults]=useState([]);
+  const [winner,setWinner]=useState(null);
+  const [revealed,setRevealed]=useState(false);
+  const [playerData,setPD]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [loadError,setLoadError]=useState(false);
+  const [locked,setLocked]=useState(null);
+
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const data=await dbGetAll();
+        if(data.photos) setPhotos(data.photos);
+        if(data.results) setResults(data.results);
+        if(data.winner) setWinner(data.winner);
+        if(data.revealed) setRevealed(data.revealed);
+        const lk=lsGet(LOCAL_KEY);if(lk)setLocked(lk);
+        setLoading(false);
+      }catch(e){
+        console.error(e);
+        setLoadError(true);
+        setLoading(false);
+      }
+    })();
+  },[]);
+
+  async function saveConfig(p){
+    setPhotos(p);
+    await dbSet("photos",p);
+  }
+
+  async function setWin(n){
+    setWinner(n);
+    await dbSet("winner",n);
+  }
+
+  async function doReveal(){
+    setRevealed(true);
+    await dbSet("revealed",true);
+  }
+
+  async function play(name){
+    setPN(name);lsSet(LOCAL_KEY,name);setLocked(name);
+    const prog=await dbGet(`prog_${name.toLowerCase().replace(/\s+/g,"_")}`);
+    const pd=prog||{answers:{},submitted:false};
+    setPD(pd);
+    setScreen(pd.submitted?(revealed?"results-revealed":"submitted"):"quiz");
+  }
+
+  async function saveProgress(answers){
+    const key=`prog_${playerName.toLowerCase().replace(/\s+/g,"_")}`;
+    const prog={answers,submitted:false};
+    setPD(prog);
+    await dbSet(key,prog);
+    // Update results list
+    const newResults=[...results.filter(r=>r.playerName!==playerName),{playerName,answers,submitted:false,date:null}];
+    setResults(newResults);
+    await dbSet("results",newResults);
+  }
+
+  async function submitAnswers(answers){
+    const date=new Date().toLocaleString("fr-FR");
+    const key=`prog_${playerName.toLowerCase().replace(/\s+/g,"_")}`;
+    const prog={answers,submitted:true};
+    setPD(prog);
+    await dbSet(key,prog);
+    const newResults=[...results.filter(r=>r.playerName!==playerName),{playerName,answers,submitted:true,date}];
+    setResults(newResults);
+    await dbSet("results",newResults);
+    setScreen(revealed?"results-revealed":"submitted");
+  }
+
+  if(loading) return React.createElement(Spinner,{text:"Connexion… 🌸"});
+
+  if(loadError) return React.createElement(Center,null,
+    React.createElement(Card,{maxWidth:"400px",style:{textAlign:"center"}},
+      React.createElement('div',{style:{fontSize:"3rem",marginBottom:"12px"}},"❌"),
+      React.createElement(Script,{size:"1.5rem",style:{marginBottom:"8px"}},"Erreur de connexion"),
+      React.createElement('div',{style:{fontFamily:sans,color:C.sub,fontSize:"0.9rem",marginBottom:"16px"}},"Impossible de charger les données. Vérifie ta connexion internet."),
+      React.createElement(Btn,{onClick:()=>window.location.reload()},"🔄 Réessayer")
+    )
+  );
+
+  const bgStars=Array.from({length:16},(_,i)=>({top:`${(i*19+5)%100}%`,left:`${(i*31+8)%100}%`,size:(i%3)*5+10,op:0.05+(i%4)*0.04}));
+
+  return React.createElement('div',{style:{minHeight:"100vh",background:C.bg,fontFamily:"'Georgia',serif",color:C.text,position:"relative"}},
+    React.createElement('div',{style:{position:"fixed",inset:0,pointerEvents:"none",zIndex:0}},
+      bgStars.map((s,i)=>React.createElement('svg',{key:i,width:s.size,height:s.size,viewBox:"0 0 24 24",style:{position:"absolute",top:s.top,left:s.left,opacity:s.op,fill:C.pink1}},
+        React.createElement('polygon',{points:"12,2 15.09,8.26 22,9.27 17,14.14 18.18,21.02 12,17.77 5.82,21.02 7,14.14 2,9.27 8.91,8.26"})
+      ))
+    ),
+    screen==="welcome"&&React.createElement(Welcome,{photos,locked,onPlay:play,onAdmin:()=>setScreen("admin-login")}),
+    screen==="admin-login"&&React.createElement(AdminLogin,{onOk:()=>setScreen("admin"),onBack:()=>setScreen("welcome")}),
+    screen==="admin"&&React.createElement(AdminPanel,{photos,results,winner,revealed,onSave:saveConfig,onSetWinner:setWin,onReveal:doReveal,onBack:()=>setScreen("welcome")}),
+    screen==="quiz"&&playerData&&React.createElement(Quiz,{playerName,photos,savedAnswers:playerData.answers,onSave:saveProgress,onSubmit:submitAnswers}),
+    screen==="submitted"&&playerData&&React.createElement(Submitted,{playerName,photos,answers:playerData.answers}),
+    screen==="results-revealed"&&playerData&&React.createElement(ResultsRevealed,{playerName,answers:playerData.answers,photos,winner,allResults:results})
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
