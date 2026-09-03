@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Quiz Bébé — 30 ans de Chloé 🎂</title>
+<title>Quiz Bébé — 30 ans de Sophie 🎂</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -22,7 +22,7 @@ button:active:not(:disabled){transform:translateY(0)}
 <div id="root"></div>
 <script type="text/babel">
 
-const ADMIN_PWD  = "chloe30ans";
+const ADMIN_PWD  = "Sophie30";
 const LOCAL_KEY  = "chloe_locked_player";
 const IMGBB_KEY  = "998ae051600461d4fa8db6519cb34a21";
 const API_URL    = "/.netlify/functions/api";
@@ -205,7 +205,7 @@ function Welcome({photos,locked,onPlay,onAdmin}) {
         React.createElement('div',{style:{fontSize:"0.72rem",fontFamily:sans,fontWeight:800,letterSpacing:"3px",color:C.sub,textTransform:"uppercase",marginBottom:"12px"}},"30 MAI 2026 · DORDOGNE"),
         React.createElement(Banner,null,"Tu es invité·e !"),
         React.createElement('div',{style:{marginTop:"14px",fontFamily:sans,fontWeight:700,fontSize:"0.9rem",color:C.text,letterSpacing:"1px"}},"AU QUIZ BÉBÉ DES"),
-        React.createElement(Script,{size:"3rem",style:{margin:"2px 0 4px"}},"30 ans de Chloé"),
+        React.createElement(Script,{size:"3rem",style:{margin:"2px 0 4px"}},"30 ans de Sophie"),
         React.createElement('div',{style:{color:C.sub,fontSize:"0.82rem",fontFamily:sans}},"Sauras-tu reconnaître qui est qui ? 🍼")
       ),
       React.createElement('div',{style:{height:"1px",background:C.pink3,margin:"18px 0"}}),
@@ -251,7 +251,7 @@ function AdminLogin({onOk,onBack}) {
     React.createElement(Card,{maxWidth:"400px",style:{textAlign:"center"}},
       React.createElement(Stars),
       React.createElement(Script,{size:"2rem",style:{marginBottom:"6px"}},"Admin"),
-      React.createElement('div',{style:{color:C.sub,fontFamily:sans,fontSize:"0.84rem",marginBottom:"18px"}},"Accès réservé à Chloé 🌸"),
+      React.createElement('div',{style:{color:C.sub,fontFamily:sans,fontSize:"0.84rem",marginBottom:"18px"}},"Accès réservé à Sophie 🌸"),
       React.createElement('input',{type:"password",placeholder:"Mot de passe...",value:pwd,onChange:e=>{setPwd(e.target.value);setErr("");},onKeyDown:e=>e.key==="Enter"&&(pwd===ADMIN_PWD?onOk():setErr("Mot de passe incorrect !")),style:{width:"100%",padding:"12px 16px",borderRadius:"12px",border:`2px solid ${C.border}`,background:C.pink4,color:C.text,fontSize:"1rem",fontFamily:sans,outline:"none",boxSizing:"border-box"}}),
       err&&React.createElement('div',{style:{color:C.pink1,fontSize:"0.8rem",marginTop:"6px",fontFamily:sans,fontWeight:700}},err),
       React.createElement(Btn,{onClick:()=>pwd===ADMIN_PWD?onOk():setErr("Mot de passe incorrect !"),style:{width:"100%",marginTop:"14px"}},"Entrer"),
@@ -313,7 +313,7 @@ function AdminPanel({photos,results,winner,revealed,onSave,onSetWinner,onReveal,
     React.createElement('div',{style:{maxWidth:"1000px",margin:"0 auto"}},
       React.createElement(Card,{maxWidth:"1000px",style:{padding:"20px"}},
         React.createElement('div',{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"16px"}},
-          React.createElement(Script,{size:"1.7rem"},"Admin — Quiz Chloé"),
+          React.createElement(Script,{size:"1.7rem"},"Admin — Quiz Sophie"),
           React.createElement(Btn,{outline:true,small:true,onClick:onBack},"← Quitter")
         ),
         React.createElement('div',{style:{display:"flex",gap:"4px",background:C.pink4,borderRadius:"12px",padding:"4px",marginBottom:"18px"}},
@@ -554,7 +554,7 @@ function Submitted({playerName,photos,answers}) {
       React.createElement(Script,{size:"2rem",style:{margin:"12px 0 8px"}},playerName),
       React.createElement('p',{style:{color:C.sub,fontFamily:sans,fontSize:"0.86rem",lineHeight:1.6,marginBottom:"18px"}},
         "Merci ! Tes réponses sont bien enregistrées.",React.createElement('br'),
-        "Les résultats seront révélés par Chloé au moment choisi.",React.createElement('br'),
+        "Les résultats seront révélés par Sophie au moment choisi.",React.createElement('br'),
         React.createElement('strong',null,"Reviens sur cette page pour les découvrir ! 🎉")
       ),
       React.createElement('div',{style:{background:C.pink4,borderRadius:"14px",padding:"12px",border:`1px solid ${C.border}`}},
